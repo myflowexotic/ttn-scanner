@@ -7,7 +7,6 @@
     <meta name="theme-color" content="#0f172a">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <link rel="manifest" href="manifest.json">
     
     <title>TTN SMART SCANNER</title>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
@@ -17,8 +16,9 @@
         body { 
             background-color: var(--app-dark); 
             -webkit-tap-highlight-color: transparent; 
-            overflow: hidden;
+            overflow-x: hidden;
             overscroll-behavior-y: contain;
+            user-select: none;
         }
         
         #video-container {
@@ -32,17 +32,12 @@
             position: absolute; top: 50%; left: 50%;
             transform: translate(-50%, -50%);
             width: 85%; height: 35%;
-            border: 2px solid rgba(59, 130, 246, 0.5);
+            border: 2px solid rgba(59, 130, 246, 0.4);
             border-radius: 12px;
             box-shadow: 0 0 0 5000px rgba(15, 23, 42, 0.75);
             z-index: 10;
+            display: none;
         }
-
-        .corner { position: absolute; width: 20px; height: 20px; border: 4px solid var(--app-blue); }
-        .tl { top: -2px; left: -2px; border-radius: 10px 0 0 0; border-right: 0; border-bottom: 0; }
-        .tr { top: -2px; right: -2px; border-radius: 0 10px 0 0; border-left: 0; border-bottom: 0; }
-        .bl { bottom: -2px; left: -2px; border-radius: 0 0 0 10px; border-right: 0; border-top: 0; }
-        .br { bottom: -2px; right: -2px; border-radius: 0 0 10px 0; border-left: 0; border-top: 0; }
 
         #scanner-line {
             position: absolute; top: 0; left: 0; width: 100%; height: 2px;
@@ -52,186 +47,183 @@
 
         @keyframes scan-line { 0%, 100% { top: 10%; opacity: 0.2; } 50% { top: 90%; opacity: 0.6; } }
         .stats-card { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
+        .work-dot { width: 8px; height: 8px; background: #3b82f6; border-radius: 50%; display: inline-block; margin-right: 6px; animation: pulse 1s infinite; }
+        @keyframes pulse { 0% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.5); opacity: 0.5; } 100% { transform: scale(1); opacity: 1; } }
     </style>
 </head>
 <body class="text-slate-200 p-4 font-sans">
 
     <header class="text-center mb-6 pt-4">
         <h1 class="text-xl font-black text-white uppercase italic">TTN <span class="text-blue-500">APP</span></h1>
-        <p class="text-[10px] font-bold text-blue-400/60 mt-1 uppercase tracking-widest text-center w-full">Система мгновенного прихода</p>
+        <p class="text-[10px] font-bold text-blue-400/60 mt-1 uppercase tracking-widest">Система мгновенного прихода</p>
     </header>
 
     <div class="max-w-md mx-auto space-y-6">
         <div id="video-container">
             <video id="video" autoplay playsinline muted></video>
             <div id="scan-region">
-                <div class="corner tl"></div><div class="corner tr"></div>
-                <div class="corner bl"></div><div class="corner br"></div>
                 <div id="scanner-line"></div>
+                <div class="absolute -top-8 left-0 w-full text-center">
+                    <span id="scan-status" class="text-[9px] font-bold text-blue-400 uppercase tracking-widest opacity-50">Ожидание...</span>
+                </div>
             </div>
             
             <div id="ocr-loader" class="absolute inset-0 bg-blue-600/20 hidden flex flex-col items-center justify-center z-20 backdrop-blur-sm">
                 <div class="bg-slate-900/90 p-6 rounded-3xl flex flex-col items-center border border-blue-500/50">
                     <div class="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                    <div class="text-[10px] mt-4 font-black text-white uppercase tracking-widest">Анализ ТТН...</div>
+                    <div class="text-[10px] mt-4 font-black text-white uppercase tracking-widest">Запись в базу...</div>
                 </div>
             </div>
         </div>
 
         <button id="start-btn" class="w-full bg-blue-600 active:bg-blue-700 py-5 rounded-2xl font-black text-white shadow-lg uppercase text-sm tracking-widest transition-all">
-            Запустить сканер
+            Открыть камеру
         </button>
 
-        <div id="results-list" class="space-y-3 pb-24 overflow-y-auto max-h-[40vh]"></div>
+        <div id="results-list" class="space-y-3 pb-24"></div>
     </div>
 
     <audio id="beep" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" preload="auto"></audio>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // === НАСТРОЙКА API KEY ===
-        // Если вы на GitHub Pages, замените кавычки ниже на ваш ключ (AIzaSy...)
-        const MY_GITHUB_API_KEY = ""; 
-        
-        // Авто-выбор ключа: системный для чата или ваш для GitHub
-        const apiKey = (typeof __initial_auth_token !== 'undefined') ? "" : MY_GITHUB_API_KEY; 
-
+        // ВАЖНО: Вставьте ваш apiKey сюда для работы на внешних доменах
         const firebaseConfig = {
-            apiKey: apiKey, 
+            apiKey: "", 
             authDomain: "main-f6446.firebaseapp.com",
             projectId: "main-f6446",
             appId: "1:733541253938:web:67d2af040d637199050d2b",
         };
 
+        const APP_ID = "supplier-tracker-v1";
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'supplier-tracker-v1';
 
         const video = document.getElementById('video');
         const startBtn = document.getElementById('start-btn');
-        const beep = document.getElementById('beep');
-        const resultsList = document.getElementById('results-list');
         const ocrLoader = document.getElementById('ocr-loader');
+        const resultsList = document.getElementById('results-list');
+        const scanRegion = document.getElementById('scan-region');
+        const scanStatus = document.getElementById('scan-status');
+        const beep = document.getElementById('beep');
 
         const SUPPLIERS_LIST = ["АвтоБот", "АвтоНова", "АвтоПалас", "АвтоСпейс", "АвтоТракМоторс", "Автоцентр Север", "АгроФильтр", "Альтра", "Аобел", "Автовар", "АС Север", "Автогаз", "АвтоИдея", "АвтоТраст", "Агромаш", "Аквилон", "АвтоАмазис", "Атлант Премиум", "Боровая", "БЭР-Авто", "БАМС", "Белагро", "БелИнвестЗапчасть", "БелИнвесТорг", "БелМоторДеталь", "БелОил", "БелСтартер", "БелТБ", "Боникс", "ВАЙБЕР", "Визит-Фвто", "Виланд", "ГаммаПлюс", "ГрандОйл", "Диал", "Диас", "Дизель-Кама", "Дюкон", "Дюлвин", "ЕвроЗапчасть", "Запад", "Инструментальный", "ИнтСелПартс", "КарПротект", "КолесоПлюс", "Крипан", "Л-авто", "Лада", "Ленсвязь", "Линник", "Мазикбай", "Мари", "Микро Альянс", "Модников", "Монлибон", "Мотехс", "МоторАвтоГрад", "Немецкая тройка", "НикадагАвто", "ОЕМ", "ЛОйл", "Омега", "ОстХим", "Парад", "ПартсБест", "Почта", "ПС АвтоГруп", "РемАвтоСнаб", "РимБат", "РосАвтоком", "Свиат", "СиванаБел", "Сплат", "ТГ", "ТрансКонсалт", "ТурбоТракс", "Фелокт", "Фильтрация", "Форвард", "Форсаж", "Фострейд", "Францемоторс", "Центр (Восток)", "Шате", "Эквипмент", "ЭкспертОйл", "Энергия"];
 
-        let isScanning = false;
+        let isProcessing = false;
+        let scanCounter = 0;
+        let user = null;
 
-        async function initAuth() {
-            try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else if (apiKey) {
-                    await signInAnonymously(auth);
-                }
-            } catch (err) {
-                console.warn("Auth initialization skipped or failed. Database might not work until API Key is provided.");
-            }
-        }
-
-        async function startCamera() {
-            const attempts = [
-                { video: { facingMode: { exact: "environment" } } },
-                { video: { facingMode: "environment" } },
-                { video: true }
-            ];
-
-            for (const constraints of attempts) {
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                    video.srcObject = stream;
-                    await video.play();
-                    return true;
-                } catch (e) {
-                    console.warn("Attempt failed:", constraints, e.message);
-                }
-            }
-            throw new Error("Камера не найдена или занята.");
-        }
+        onAuthStateChanged(auth, (u) => { user = u; });
+        signInAnonymously(auth).catch(e => console.error("Auth init error:", e));
 
         startBtn.addEventListener('click', async () => {
             try {
-                await startCamera();
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: "environment", width: { ideal: 1280 } } 
+                });
+                video.srcObject = stream;
                 startBtn.style.display = 'none';
-                await initAuth();
-                startProcessingLoop();
+                scanRegion.style.display = 'block';
+                
+                // Запуск цикла сканирования
+                setInterval(scan, 2500);
             } catch (err) {
-                alert("Ошибка доступа к камере. Попробуйте обновить страницу или закрыть другие приложения.");
+                alert("Ошибка камеры: " + err.message);
             }
         });
 
-        async function startProcessingLoop() {
-            while (true) {
-                if (!isScanning && video.readyState === 4) {
-                    await processFrame();
-                }
-                await new Promise(r => setTimeout(r, 2000));
-            }
-        }
+        async function scan() {
+            if (isProcessing || video.paused || video.readyState !== 4) return;
+            
+            scanStatus.innerText = "Сканирую...";
+            scanStatus.classList.add("opacity-100");
 
-        async function processFrame() {
-            isScanning = true;
             const canvas = document.createElement('canvas');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            canvas.getContext('2d').drawImage(video, 0, 0);
+            const vW = video.videoWidth;
+            const vH = video.videoHeight;
+            
+            // Настраиваем размер холста для Tesseract
+            canvas.width = 640;
+            canvas.height = 320;
+            const ctx = canvas.getContext('2d');
+            
+            // Вырезаем область центральной рамки (85% ширины, 35% высоты)
+            ctx.drawImage(video, vW * 0.075, vH * 0.325, vW * 0.85, vH * 0.35, 0, 0, 640, 320);
 
             try {
-                const { data: { text } } = await Tesseract.recognize(canvas, 'rus');
-                const lowerText = text.toLowerCase();
+                const result = await Tesseract.recognize(canvas, 'rus');
+                const detectedText = result.data.text.toLowerCase();
                 
                 for (let supplier of SUPPLIERS_LIST) {
-                    if (lowerText.includes(supplier.toLowerCase())) {
-                        await registerArrival(supplier);
-                        break; 
+                    if (detectedText.includes(supplier.toLowerCase())) {
+                        await handleMatch(supplier);
+                        break;
                     }
                 }
             } catch (e) {
                 console.error("OCR Error:", e);
             } finally {
-                isScanning = false;
+                scanStatus.innerText = "Ожидание...";
+                scanStatus.classList.remove("opacity-100");
             }
         }
 
-        async function registerArrival(name) {
+        async function handleMatch(name) {
+            isProcessing = true;
             const docId = name.replace(/\s+/g, "_").toLowerCase();
-            if (document.getElementById(`res-${docId}`)) return;
+            
+            // Если уже в списке текущей сессии — игнорируем
+            if (document.getElementById(`res-${docId}`)) {
+                isProcessing = false;
+                return;
+            }
 
             ocrLoader.style.display = 'flex';
-            const timeStr = new Date().toLocaleTimeString("ru-RU", { hour: '2-digit', minute: '2-digit' });
-            
+            const now = new Date();
+            const time = now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+
             try {
-                // Пытаемся сохранить в облако только если мы авторизованы
-                if (auth.currentUser) {
-                    const docRef = doc(db, "artifacts", appId, "public", "data", "arrivals", docId);
+                // Пытаемся сохранить (setDoc создаст, если нет)
+                if (user) {
+                    const docRef = doc(db, "artifacts", APP_ID, "public", "data", "suppliers", docId);
                     await setDoc(docRef, { 
-                        name: name,
+                        name: name, 
                         status: "arrived", 
-                        time: timeStr, 
-                        timestamp: serverTimestamp() 
+                        arrivalTime: time, 
+                        lastUpdated: serverTimestamp() 
                     }, { merge: true });
                 }
 
-                // В любом случае показываем результат на экране
+                // Успешный результат
                 beep.play().catch(() => {});
+                if (navigator.vibrate) navigator.vibrate(100);
+                
+                scanCounter++;
                 const el = document.createElement('div');
                 el.id = `res-${docId}`;
-                el.className = "stats-card p-4 rounded-2xl flex justify-between items-center border-l-4 border-blue-500 mb-2";
+                el.className = "stats-card p-4 rounded-2xl flex justify-between items-center border-l-4 border-blue-500 mb-3 animate-bounce";
                 el.innerHTML = `
-                    <div>
-                        <div class="text-[8px] text-slate-500 uppercase font-bold tracking-widest">Статус: Прибыл</div>
-                        <div class="font-black text-sm text-white uppercase">${name}</div>
+                    <div class="flex items-center gap-3">
+                        <span class="text-blue-500 font-black text-sm">#${scanCounter}</span>
+                        <div>
+                            <div class="text-[8px] text-slate-500 font-bold uppercase">Обнаружен</div>
+                            <div class="font-black uppercase text-xs text-white">${name}</div>
+                        </div>
                     </div>
-                    <div class="text-blue-400 font-mono text-xs font-bold">${timeStr}</div>
+                    <div class="text-blue-400 font-mono text-xs font-bold">${time}</div>
                 `;
                 resultsList.prepend(el);
+                
+                // Небольшая пауза, чтобы не сканировать одно и то же по кругу
+                await new Promise(r => setTimeout(r, 2000));
             } catch (e) {
-                console.error("Database save failed:", e);
+                console.error("Firestore Save Error:", e);
             } finally {
+                isProcessing = false;
                 ocrLoader.style.display = 'none';
             }
         }
