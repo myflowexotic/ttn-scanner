@@ -9,7 +9,8 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     
     <title>TTN SMART SCANNER</title>
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+    <!-- Используем стабильную версию Tesseract -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         :root { --app-blue: #3b82f6; --app-dark: #0f172a; }
@@ -31,8 +32,8 @@
         #scan-region {
             position: absolute; top: 50%; left: 50%;
             transform: translate(-50%, -50%);
-            width: 85%; height: 35%;
-            border: 2px solid rgba(59, 130, 246, 0.4);
+            width: 85%; height: 30%;
+            border: 2px solid rgba(59, 130, 246, 0.6);
             border-radius: 12px;
             box-shadow: 0 0 0 5000px rgba(15, 23, 42, 0.75);
             z-index: 10;
@@ -47,15 +48,13 @@
 
         @keyframes scan-line { 0%, 100% { top: 10%; opacity: 0.2; } 50% { top: 90%; opacity: 0.6; } }
         .stats-card { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
-        .work-dot { width: 8px; height: 8px; background: #3b82f6; border-radius: 50%; display: inline-block; margin-right: 6px; animation: pulse 1s infinite; }
-        @keyframes pulse { 0% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.5); opacity: 0.5; } 100% { transform: scale(1); opacity: 1; } }
     </style>
 </head>
 <body class="text-slate-200 p-4 font-sans">
 
     <header class="text-center mb-6 pt-4">
         <h1 class="text-xl font-black text-white uppercase italic">TTN <span class="text-blue-500">APP</span></h1>
-        <p class="text-[10px] font-bold text-blue-400/60 mt-1 uppercase tracking-widest">Система мгновенного прихода</p>
+        <p id="system-msg" class="text-[10px] font-bold text-blue-400/60 mt-1 uppercase tracking-widest">Инициализация...</p>
     </header>
 
     <div class="max-w-md mx-auto space-y-6">
@@ -69,15 +68,15 @@
             </div>
             
             <div id="ocr-loader" class="absolute inset-0 bg-blue-600/20 hidden flex flex-col items-center justify-center z-20 backdrop-blur-sm">
-                <div class="bg-slate-900/90 p-6 rounded-3xl flex flex-col items-center border border-blue-500/50">
-                    <div class="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                    <div class="text-[10px] mt-4 font-black text-white uppercase tracking-widest">Запись в базу...</div>
+                <div class="bg-slate-900/90 p-6 rounded-3xl border border-blue-500/50">
+                    <div class="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                    <div class="text-[10px] mt-4 font-black text-white uppercase tracking-widest">Обработка...</div>
                 </div>
             </div>
         </div>
 
         <button id="start-btn" class="w-full bg-blue-600 active:bg-blue-700 py-5 rounded-2xl font-black text-white shadow-lg uppercase text-sm tracking-widest transition-all">
-            Открыть камеру
+            Запустить сканер
         </button>
 
         <div id="results-list" class="space-y-3 pb-24"></div>
@@ -87,12 +86,11 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // ВАЖНО: Вставьте ваш apiKey сюда для работы на внешних доменах
         const firebaseConfig = {
-            apiKey: "", 
+            apiKey: "", // ВСТАВЬТЕ ВАШ КЛЮЧ
             authDomain: "main-f6446.firebaseapp.com",
             projectId: "main-f6446",
             appId: "1:733541253938:web:67d2af040d637199050d2b",
@@ -105,20 +103,33 @@
 
         const video = document.getElementById('video');
         const startBtn = document.getElementById('start-btn');
-        const ocrLoader = document.getElementById('ocr-loader');
         const resultsList = document.getElementById('results-list');
-        const scanRegion = document.getElementById('scan-region');
         const scanStatus = document.getElementById('scan-status');
-        const beep = document.getElementById('beep');
-
+        const sysMsg = document.getElementById('system-msg');
+        
         const SUPPLIERS_LIST = ["АвтоБот", "АвтоНова", "АвтоПалас", "АвтоСпейс", "АвтоТракМоторс", "Автоцентр Север", "АгроФильтр", "Альтра", "Аобел", "Автовар", "АС Север", "Автогаз", "АвтоИдея", "АвтоТраст", "Агромаш", "Аквилон", "АвтоАмазис", "Атлант Премиум", "Боровая", "БЭР-Авто", "БАМС", "Белагро", "БелИнвестЗапчасть", "БелИнвесТорг", "БелМоторДеталь", "БелОил", "БелСтартер", "БелТБ", "Боникс", "ВАЙБЕР", "Визит-Фвто", "Виланд", "ГаммаПлюс", "ГрандОйл", "Диал", "Диас", "Дизель-Кама", "Дюкон", "Дюлвин", "ЕвроЗапчасть", "Запад", "Инструментальный", "ИнтСелПартс", "КарПротект", "КолесоПлюс", "Крипан", "Л-авто", "Лада", "Ленсвязь", "Линник", "Мазикбай", "Мари", "Микро Альянс", "Модников", "Монлибон", "Мотехс", "МоторАвтоГрад", "Немецкая тройка", "НикадагАвто", "ОЕМ", "ЛОйл", "Омега", "ОстХим", "Парад", "ПартсБест", "Почта", "ПС АвтоГруп", "РемАвтоСнаб", "РимБат", "РосАвтоком", "Свиат", "СиванаБел", "Сплат", "ТГ", "ТрансКонсалт", "ТурбоТракс", "Фелокт", "Фильтрация", "Форвард", "Форсаж", "Фострейд", "Францемоторс", "Центр (Восток)", "Шате", "Эквипмент", "ЭкспертОйл", "Энергия"];
 
-        let isProcessing = false;
-        let scanCounter = 0;
-        let user = null;
+        let worker = null;
+        let isOcrReady = false;
+        let scanInProgress = false;
 
-        onAuthStateChanged(auth, (u) => { user = u; });
-        signInAnonymously(auth).catch(e => console.error("Auth init error:", e));
+        // Инициализация Tesseract заранее
+        async function initOCR() {
+            sysMsg.innerText = "Загрузка движка...";
+            worker = await Tesseract.createWorker({
+                logger: m => {
+                    if (m.status === 'recognizing text') {
+                        scanStatus.innerText = `Анализ ${Math.round(m.progress * 100)}%`;
+                    }
+                }
+            });
+            await worker.loadLanguage('rus');
+            await worker.initialize('rus');
+            isOcrReady = true;
+            sysMsg.innerText = "Система готова";
+        }
+
+        initOCR();
 
         startBtn.addEventListener('click', async () => {
             try {
@@ -127,104 +138,87 @@
                 });
                 video.srcObject = stream;
                 startBtn.style.display = 'none';
-                scanRegion.style.display = 'block';
+                document.getElementById('scan-region').style.display = 'block';
                 
-                // Запуск цикла сканирования
-                setInterval(scan, 2500);
+                await signInAnonymously(auth).catch(() => {});
+                
+                // Основной цикл
+                loop();
             } catch (err) {
-                alert("Ошибка камеры: " + err.message);
+                alert("Камера недоступна: " + err.message);
             }
         });
 
-        async function scan() {
-            if (isProcessing || video.paused || video.readyState !== 4) return;
-            
-            scanStatus.innerText = "Сканирую...";
-            scanStatus.classList.add("opacity-100");
+        async function loop() {
+            if (!scanInProgress && isOcrReady && video.readyState === 4) {
+                await processFrame();
+            }
+            setTimeout(loop, 1500); // Интервал между попытками
+        }
+
+        async function processFrame() {
+            scanInProgress = true;
+            scanStatus.innerText = "Считывание...";
 
             const canvas = document.createElement('canvas');
-            const vW = video.videoWidth;
-            const vH = video.videoHeight;
-            
-            // Настраиваем размер холста для Tesseract
             canvas.width = 640;
             canvas.height = 320;
             const ctx = canvas.getContext('2d');
             
-            // Вырезаем область центральной рамки (85% ширины, 35% высоты)
-            ctx.drawImage(video, vW * 0.075, vH * 0.325, vW * 0.85, vH * 0.35, 0, 0, 640, 320);
+            // Вырезаем центральную область
+            const vW = video.videoWidth;
+            const vH = video.videoHeight;
+            ctx.drawImage(video, vW * 0.1, vH * 0.35, vW * 0.8, vH * 0.3, 0, 0, 640, 320);
 
             try {
-                const result = await Tesseract.recognize(canvas, 'rus');
-                const detectedText = result.data.text.toLowerCase();
+                const { data: { text } } = await worker.recognize(canvas);
+                const rawText = text.toLowerCase();
                 
                 for (let supplier of SUPPLIERS_LIST) {
-                    if (detectedText.includes(supplier.toLowerCase())) {
-                        await handleMatch(supplier);
+                    if (rawText.includes(supplier.toLowerCase())) {
+                        await registerSupplier(supplier);
                         break;
                     }
                 }
             } catch (e) {
-                console.error("OCR Error:", e);
+                console.error(e);
             } finally {
+                scanInProgress = false;
                 scanStatus.innerText = "Ожидание...";
-                scanStatus.classList.remove("opacity-100");
             }
         }
 
-        async function handleMatch(name) {
-            isProcessing = true;
-            const docId = name.replace(/\s+/g, "_").toLowerCase();
-            
-            // Если уже в списке текущей сессии — игнорируем
-            if (document.getElementById(`res-${docId}`)) {
-                isProcessing = false;
-                return;
-            }
+        async function registerSupplier(name) {
+            const id = name.replace(/\s+/g, "_").toLowerCase();
+            if (document.getElementById(`item-${id}`)) return;
 
-            ocrLoader.style.display = 'flex';
-            const now = new Date();
-            const time = now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+            document.getElementById('ocr-loader').style.display = 'flex';
+            const time = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
 
+            // 1. Показываем на экране сразу
+            const el = document.createElement('div');
+            el.id = `item-${id}`;
+            el.className = "stats-card p-4 rounded-2xl flex justify-between items-center border-l-4 border-blue-500 animate-pulse";
+            el.innerHTML = `
+                <div>
+                    <div class="text-[8px] text-blue-400 font-bold uppercase tracking-widest">Прибыл</div>
+                    <div class="font-black text-white uppercase text-sm">${name}</div>
+                </div>
+                <div class="text-blue-500 font-mono text-xs font-bold">${time}</div>
+            `;
+            resultsList.prepend(el);
+            document.getElementById('beep').play().catch(() => {});
+
+            // 2. Пробуем сохранить в Firebase
             try {
-                // Пытаемся сохранить (setDoc создаст, если нет)
-                if (user) {
-                    const docRef = doc(db, "artifacts", APP_ID, "public", "data", "suppliers", docId);
-                    await setDoc(docRef, { 
-                        name: name, 
-                        status: "arrived", 
-                        arrivalTime: time, 
-                        lastUpdated: serverTimestamp() 
-                    }, { merge: true });
+                if (auth.currentUser) {
+                    const docRef = doc(db, "artifacts", APP_ID, "public", "data", "arrivals", id);
+                    await setDoc(docRef, { name, time, timestamp: serverTimestamp() }, { merge: true });
                 }
-
-                // Успешный результат
-                beep.play().catch(() => {});
-                if (navigator.vibrate) navigator.vibrate(100);
-                
-                scanCounter++;
-                const el = document.createElement('div');
-                el.id = `res-${docId}`;
-                el.className = "stats-card p-4 rounded-2xl flex justify-between items-center border-l-4 border-blue-500 mb-3 animate-bounce";
-                el.innerHTML = `
-                    <div class="flex items-center gap-3">
-                        <span class="text-blue-500 font-black text-sm">#${scanCounter}</span>
-                        <div>
-                            <div class="text-[8px] text-slate-500 font-bold uppercase">Обнаружен</div>
-                            <div class="font-black uppercase text-xs text-white">${name}</div>
-                        </div>
-                    </div>
-                    <div class="text-blue-400 font-mono text-xs font-bold">${time}</div>
-                `;
-                resultsList.prepend(el);
-                
-                // Небольшая пауза, чтобы не сканировать одно и то же по кругу
-                await new Promise(r => setTimeout(r, 2000));
             } catch (e) {
-                console.error("Firestore Save Error:", e);
+                console.warn("Firebase save skipped (No API Key or Offline)");
             } finally {
-                isProcessing = false;
-                ocrLoader.style.display = 'none';
+                document.getElementById('ocr-loader').style.display = 'none';
             }
         }
     </script>
