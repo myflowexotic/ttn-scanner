@@ -92,8 +92,10 @@
         import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Автоматический выбор ключа
-        const apiKey = typeof __initial_auth_token !== 'undefined' ? "" : "ВАШ_API_KEY_ИЗ_FIREBASE_CONSOLE"; 
+        // ЗАМЕНИТЕ ЭТУ СТРОКУ НА ВАШ КЛЮЧ ИЗ FIREBASE CONSOLE
+        const MY_REAL_API_KEY = "ВАШ_API_KEY_ЗДЕСЬ"; 
+        
+        const apiKey = typeof __initial_auth_token !== 'undefined' ? "" : MY_REAL_API_KEY; 
 
         const firebaseConfig = {
             apiKey: apiKey, 
@@ -121,32 +123,43 @@
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                     await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
+                } else if (apiKey) {
                     await signInAnonymously(auth);
                 }
             } catch (err) {
-                console.error("Auth Error:", err);
-                // Если это ваш личный проект, убедитесь что в Firebase включен метод "Anonymous"
+                console.warn("Auth warning:", err.message);
             }
+        }
+
+        async function startCamera() {
+            // Сначала пробуем максимально простые настройки для задней камеры
+            const attempts = [
+                { video: { facingMode: { exact: "environment" } } },
+                { video: { facingMode: "environment" } },
+                { video: true }
+            ];
+
+            for (const constraints of attempts) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                    video.srcObject = stream;
+                    await video.play();
+                    return true;
+                } catch (e) {
+                    console.warn("Attempt failed:", constraints, e.message);
+                }
+            }
+            throw new Error("Не удалось получить доступ ни к одной камере.");
         }
 
         startBtn.addEventListener('click', async () => {
             try {
-                const constraints = { 
-                    video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } 
-                };
-                
-                const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                video.srcObject = stream;
-                video.setAttribute("playsinline", true);
-                video.play();
-                
+                await startCamera();
                 startBtn.style.display = 'none';
-                
                 await initAuth();
                 startProcessingLoop();
             } catch (err) {
-                alert("Ошибка: " + err.message);
+                alert("Ошибка: " + err.message + "\nПопробуйте закрыть другие приложения, использующие камеру.");
             }
         });
 
@@ -184,7 +197,6 @@
         }
 
         async function registerArrival(name) {
-            if (!auth.currentUser) return;
             const docId = name.replace(/\s+/g, "_").toLowerCase();
             if (document.getElementById(`res-${docId}`)) return;
 
@@ -192,13 +204,16 @@
             const timeStr = new Date().toLocaleTimeString("ru-RU", { hour: '2-digit', minute: '2-digit' });
             
             try {
-                const docRef = doc(db, "artifacts", appId, "public", "data", "arrivals", docId);
-                await setDoc(docRef, { 
-                    name: name,
-                    status: "arrived", 
-                    time: timeStr, 
-                    timestamp: serverTimestamp() 
-                }, { merge: true });
+                // Если авторизация прошла, сохраняем в БД
+                if (auth.currentUser) {
+                    const docRef = doc(db, "artifacts", appId, "public", "data", "arrivals", docId);
+                    await setDoc(docRef, { 
+                        name: name,
+                        status: "arrived", 
+                        time: timeStr, 
+                        timestamp: serverTimestamp() 
+                    }, { merge: true });
+                }
 
                 beep.play().catch(() => {});
                 const el = document.createElement('div');
