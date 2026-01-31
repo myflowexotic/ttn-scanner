@@ -6,49 +6,87 @@
     <meta name="theme-color" content="#0f172a">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>TTN SMART SCANNER v40</title>
+    <title>TTN SMART SCANNER v41</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         :root { --app-blue: #3b82f6; --app-dark: #0f172a; }
-        body { background-color: var(--app-dark); -webkit-tap-highlight-color: transparent; overflow-x: hidden; overscroll-behavior-y: contain; }
-        #video-container { position: relative; width: 100%; aspect-ratio: 3/4; overflow: hidden; border-radius: 24px; border: 2px solid rgba(255,255,255,0.1); background: #000; }
+        body { 
+            background-color: var(--app-dark); 
+            -webkit-tap-highlight-color: transparent; 
+            overflow-x: hidden; 
+            overscroll-behavior-y: contain;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #video-container { 
+            position: relative; 
+            width: 100%; 
+            max-width: 500px;
+            aspect-ratio: 3/4; 
+            overflow: hidden; 
+            border-radius: 24px; 
+            border: 2px solid rgba(255,255,255,0.1); 
+            background: #000; 
+        }
         video { width: 100%; height: 100%; object-fit: cover; }
-        #scan-region { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 85%; height: 30%; border: 2px solid rgba(59, 130, 246, 0.6); border-radius: 12px; box-shadow: 0 0 0 5000px rgba(15, 23, 42, 0.75); z-index: 10; display: none; }
-        #scanner-line { position: absolute; top: 0; left: 0; width: 100%; height: 2px; background: var(--app-blue); box-shadow: 0 0 15px 3px var(--app-blue); animation: scan-line 2s ease-in-out infinite; }
-        @keyframes scan-line { 0%, 100% { top: 10%; opacity: 0.2; } 50% { top: 90%; opacity: 0.6; } }
-        .stats-card { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
+        #scan-region { 
+            position: absolute; top: 50%; left: 50%; 
+            transform: translate(-50%, -50%); 
+            width: 85%; height: 30%; 
+            border: 2px solid rgba(59, 130, 246, 0.8); 
+            border-radius: 12px; 
+            box-shadow: 0 0 0 5000px rgba(15, 23, 42, 0.8); 
+            z-index: 10; 
+            display: none; 
+            pointer-events: none;
+        }
+        #scanner-line { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 2px; 
+            background: var(--app-blue); 
+            box-shadow: 0 0 15px 3px var(--app-blue); 
+            animation: scan-line 2s ease-in-out infinite; 
+        }
+        @keyframes scan-line { 0%, 100% { top: 10%; opacity: 0.2; } 50% { top: 90%; opacity: 0.8; } }
+        .stats-card { background: rgba(30, 41, 59, 0.8); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
+        .btn-glow { box-shadow: 0 0 20px rgba(59, 130, 246, 0.4); }
     </style>
 </head>
 <body class="text-slate-200 p-4 font-sans">
 
-    <header class="text-center mb-6 pt-4">
-        <h1 class="text-xl font-black text-white uppercase italic">TTN <span class="text-blue-500">APP</span></h1>
-        <p id="system-msg" class="text-[10px] font-bold text-blue-400/60 mt-1 uppercase tracking-widest text-center w-full">Готов к работе</p>
+    <header class="text-center mb-6 pt-4 w-full">
+        <h1 class="text-xl font-black text-white uppercase italic tracking-tighter">TTN <span class="text-blue-500">SCANNER</span></h1>
+        <p id="system-msg" class="text-[10px] font-bold text-blue-400 mt-1 uppercase tracking-widest bg-blue-500/10 py-1 px-3 rounded-full inline-block">Нажмите «Включить»</p>
     </header>
 
-    <div class="max-w-md mx-auto space-y-6">
+    <div class="w-full max-w-md space-y-6">
         <div id="video-container">
             <video id="video" autoplay playsinline muted></video>
             <div id="scan-region">
                 <div id="scanner-line"></div>
-                <div class="absolute -top-8 left-0 w-full text-center">
-                    <span id="scan-status" class="text-[9px] font-bold text-blue-400 uppercase tracking-widest opacity-50">Камера активна</span>
+                <div class="absolute -bottom-10 left-0 w-full text-center">
+                    <span id="scan-status" class="text-[10px] font-black text-blue-400 uppercase tracking-widest">Поиск накладной...</span>
                 </div>
             </div>
             
-            <div id="ocr-loader" class="absolute inset-0 bg-blue-600/20 hidden flex flex-col items-center justify-center z-20 backdrop-blur-sm">
-                <div class="bg-slate-900/90 p-6 rounded-3xl border border-blue-500/50">
-                    <div class="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-                    <div class="text-[10px] mt-4 font-black text-white uppercase tracking-widest">Обработка...</div>
+            <div id="ocr-loader" class="absolute inset-0 bg-slate-900/60 hidden flex flex-col items-center justify-center z-20 backdrop-blur-sm">
+                <div class="bg-slate-900 p-6 rounded-3xl border-2 border-blue-500/50 shadow-2xl">
+                    <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                    <div class="text-[10px] mt-4 font-black text-white uppercase tracking-widest">Данные приняты</div>
                 </div>
             </div>
         </div>
 
-        <button id="start-btn" class="w-full bg-blue-600 active:bg-blue-700 py-5 rounded-2xl font-black text-white shadow-lg uppercase text-sm tracking-widest transition-all">
-            Включить сканер
-        </button>
+        <div id="controls" class="flex flex-col gap-4">
+            <button id="start-btn" class="btn-glow w-full bg-blue-600 active:scale-95 py-5 rounded-2xl font-black text-white uppercase text-sm tracking-widest transition-all">
+                Включить камеру
+            </button>
+        </div>
 
-        <div id="results-list" class="space-y-3 pb-24 overflow-y-auto max-h-[40vh]"></div>
+        <div id="results-list" class="space-y-3 pb-24 overflow-y-auto max-h-[35vh]">
+            <!-- Здесь будут появляться сканы -->
+        </div>
     </div>
 
     <audio id="beep" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" preload="auto"></audio>
@@ -60,16 +98,24 @@
         import { getFirestore, doc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         const firebaseConfig = {
-            apiKey: "", // Рекомендуется вставить ключ для стабильности Auth
+            apiKey: "", 
             authDomain: "main-f6446.firebaseapp.com",
             projectId: "main-f6446",
             appId: "1:733541253938:web:67d2af040d637199050d2b",
         };
 
         const APP_ID = "supplier-tracker-v1";
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
+        let db = null;
+        let auth = null;
+
+        // Попытка инициализации Firebase
+        try {
+            const app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getFirestore(app);
+        } catch (e) {
+            console.warn("Firebase config is incomplete");
+        }
 
         const video = document.getElementById('video');
         const startBtn = document.getElementById('start-btn');
@@ -83,46 +129,55 @@
         let isOcrReady = false;
         let scanInProgress = false;
 
-        // 1. Сначала инициализируем камеру (это приоритет для пользователя)
-        async function startCamera() {
-            sysMsg.innerText = "Запуск камеры...";
+        async function startApp() {
+            startBtn.disabled = true;
+            sysMsg.innerText = "Запрос камеры...";
+
             try {
+                // 1. Сначала пытаемся получить поток
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { 
                         facingMode: "environment",
                         width: { ideal: 1280 },
                         height: { ideal: 720 }
-                    } 
+                    },
+                    audio: false
                 });
+                
                 video.srcObject = stream;
                 
-                // Ждем пока видео реально пойдет
-                await new Promise((resolve) => {
-                    video.onloadedmetadata = () => {
-                        video.play();
-                        resolve();
-                    };
-                });
+                // Форсируем запуск
+                await video.play();
 
                 startBtn.style.display = 'none';
                 document.getElementById('scan-region').style.display = 'block';
-                sysMsg.innerText = "Камера запущена";
+                sysMsg.innerText = "Камера OK. Грузим AI...";
 
-                // 2. Только ПОСЛЕ запуска камеры грузим OCR и Auth
-                initOCR();
-                signInAnonymously(auth).catch(() => {});
+                // 2. Параллельно авторизация и загрузка AI
+                if (auth) signInAnonymously(auth).catch(e => console.error("Auth fail", e));
                 
-                loop();
+                initOCR().then(() => {
+                    sysMsg.innerText = "Сканер активен";
+                    loop();
+                });
+
             } catch (err) {
-                console.error(err);
-                sysMsg.innerText = "Ошибка доступа";
-                alert("Ошибка: Не удалось получить доступ к камере. Проверьте разрешения в браузере.");
+                console.error("Camera Error:", err);
+                startBtn.disabled = false;
+                sysMsg.innerText = "Ошибка: " + err.name;
+                
+                if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+                    alert("Доступ к камере отклонен. Разрешите камеру в браузере.");
+                } else if (err.name === "NotFoundError") {
+                    alert("Камера не найдена на этом устройстве.");
+                } else {
+                    alert("Не удалось запустить камеру. Попробуйте обновить страницу.");
+                }
             }
         }
 
         async function initOCR() {
             try {
-                sysMsg.innerText = "Загрузка AI...";
                 worker = await Tesseract.createWorker();
                 await worker.loadLanguage('rus');
                 await worker.initialize('rus');
@@ -130,34 +185,35 @@
                     tessedit_char_whitelist: 'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя0123456789- ',
                 });
                 isOcrReady = true;
-                sysMsg.innerText = "Система готова";
             } catch (e) {
-                sysMsg.innerText = "Ошибка AI";
+                console.error("OCR Init Error", e);
+                sysMsg.innerText = "Ошибка AI модуля";
             }
         }
 
-        startBtn.addEventListener('click', startCamera);
+        startBtn.addEventListener('click', startApp);
 
         async function loop() {
             if (!scanInProgress && isOcrReady && video.readyState >= 2) {
                 await processFrame();
             }
-            setTimeout(loop, 2000); // Увеличил интервал для стабильности мобилок
+            setTimeout(loop, 1500); 
         }
 
         async function processFrame() {
             scanInProgress = true;
-            scanStatus.innerText = "АНАЛИЗ...";
             
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
-            canvas.width = 600;
-            canvas.height = 300;
+            // Оптимальный размер для быстрого OCR
+            canvas.width = 640;
+            canvas.height = 320;
             
-            // Захват центральной части
             const vW = video.videoWidth;
             const vH = video.videoHeight;
-            ctx.drawImage(video, vW * 0.1, vH * 0.35, vW * 0.8, vH * 0.3, 0, 0, 600, 300);
+            
+            // Кроп центральной области
+            ctx.drawImage(video, vW * 0.1, vH * 0.35, vW * 0.8, vH * 0.3, 0, 0, 640, 320);
 
             try {
                 const { data: { text } } = await worker.recognize(canvas);
@@ -170,10 +226,9 @@
                     }
                 }
             } catch (e) {
-                console.warn("Scan skip");
+                console.warn("Frame process skip");
             } finally {
                 scanInProgress = false;
-                scanStatus.innerText = "ПОИСК...";
             }
         }
 
@@ -182,33 +237,33 @@
             if (document.getElementById(`item-${id}`)) return;
 
             document.getElementById('ocr-loader').classList.remove('hidden');
-            if (navigator.vibrate) navigator.vibrate([50, 30, 50]);
+            if (navigator.vibrate) navigator.vibrate([70, 40, 70]);
             document.getElementById('beep').play().catch(() => {});
 
             const time = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
             const el = document.createElement('div');
             el.id = `item-${id}`;
-            el.className = "stats-card p-4 rounded-2xl flex justify-between items-center border-l-4 border-blue-500 animate-pulse";
+            el.className = "stats-card p-4 rounded-2xl flex justify-between items-center border-l-4 border-blue-500 shadow-xl animate-bounce";
             el.innerHTML = `
                 <div>
-                    <div class="text-[8px] text-blue-400 font-bold uppercase">Обнаружен</div>
+                    <div class="text-[8px] text-blue-400 font-bold uppercase tracking-widest">Прибытие</div>
                     <div class="font-black text-white uppercase text-sm">${name}</div>
                 </div>
-                <div class="text-blue-500 font-mono text-xs font-bold">${time}</div>
+                <div class="text-blue-500 font-mono text-xs font-bold bg-blue-500/10 px-2 py-1 rounded-lg">${time}</div>
             `;
             resultsList.prepend(el);
 
             try {
-                if (auth.currentUser) {
+                if (db && auth && auth.currentUser) {
                     const docRef = doc(db, "artifacts", APP_ID, "public", "data", "arrivals", id);
                     await setDoc(docRef, { name, time, timestamp: serverTimestamp() }, { merge: true });
                 }
             } catch (e) {
-                console.error("Firebase save error");
+                console.error("Firebase fail");
             } finally {
                 setTimeout(() => {
                     document.getElementById('ocr-loader').classList.add('hidden');
-                }, 800);
+                }, 1000);
             }
         }
     </script>
