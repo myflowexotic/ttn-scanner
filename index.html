@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    
+    <!-- Настройки для мобильного приложения -->
+    <meta name="theme-color" content="#0f172a">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="manifest.json">
+    
+    <title>TTN SMART SCANNER</title>
+    <!-- Подключаем Tesseract.js для распознавания текста -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root { --app-blue: #3b82f6; --app-dark: #0f172a; }
+        body { 
+            background-color: var(--app-dark); 
+            -webkit-tap-highlight-color: transparent; 
+            overflow-x: hidden;
+            overscroll-behavior-y: contain;
+            user-select: none;
+        }
+        
+        #video-container {
+            position: relative; width: 100%; aspect-ratio: 3/4; overflow: hidden;
+            border-radius: 24px; border: 2px solid rgba(255,255,255,0.1); background: #000;
+            -webkit-mask-image: -webkit-radial-gradient(white, black);
+        }
+        
+        video { 
+            width: 100%; height: 100%; object-fit: cover; 
+            -webkit-playsinline: true;
+            pointer-events: none;
+        }
+
+        #scan-region {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 85%; height: 35%;
+            border: 2px solid rgba(59, 130, 246, 0.3);
+            border-radius: 12px;
+            box-shadow: 0 0 0 5000px rgba(15, 23, 42, 0.75);
+            z-index: 10;
+            display: none;
+        }
+
+        .corner { position: absolute; width: 20px; height: 20px; border: 4px solid var(--app-blue); }
+        .tl { top: -2px; left: -2px; border-right: 0; border-bottom: 0; border-radius: 10px 0 0 0; }
+        .tr { top: -2px; right: -2px; border-left: 0; border-bottom: 0; border-radius: 0 10px 0 0; }
+        .bl { bottom: -2px; left: -2px; border-right: 0; border-top: 0; border-radius: 0 0 0 10px; }
+        .br { bottom: -2px; right: -2px; border-left: 0; border-top: 0; border-radius: 0 0 10px 0; }
+
+        #scanner-line {
+            position: absolute; top: 0; left: 0; width: 100%; height: 2px;
+            background: var(--app-blue); box-shadow: 0 0 15px 3px var(--app-blue);
+            animation: scan-line 2s ease-in-out infinite;
+        }
+
+        @keyframes scan-line { 0%, 100% { top: 10%; opacity: 0.2; } 50% { top: 90%; opacity: 0.6; } }
+        .stats-card { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
+        .work-dot { width: 8px; height: 8px; background: #10b981; border-radius: 50%; display: inline-block; margin-right: 6px; animation: pulse-green 1.5s infinite; }
+        @keyframes pulse-green { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body class="text-slate-200 p-4 font-sans">
+
+    <header class="text-center mb-6 pt-4">
+        <h1 class="text-xl font-black text-white uppercase tracking-tight italic">TTN <span class="text-blue-500">APP</span></h1>
+        <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest text-blue-400/60 mt-1">
+            Система мгновенного прихода
+        </p>
+    </header>
+
+    <div class="max-w-md mx-auto space-y-6">
+        <div id="video-container">
+            <video id="video" autoplay playsinline muted></video>
+            <div id="scan-region">
+                <div class="corner tl"></div><div class="corner tr"></div>
+                <div class="corner bl"></div><div class="corner br"></div>
+                <div id="scanner-line"></div>
+                <div class="absolute -bottom-10 left-0 w-full text-center">
+                    <p id="live-hint" class="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                        <span class="work-dot"></span> Наведите на грузоотправителя
+                    </p>
+                </div>
+            </div>
+            
+            <div id="ocr-loader" class="absolute inset-0 bg-blue-600/20 hidden flex flex-col items-center justify-center z-20 backdrop-blur-sm">
+                <div class="bg-slate-900/90 p-6 rounded-3xl flex flex-col items-center border border-blue-500/50 shadow-2xl">
+                    <div class="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                    <div class="text-[10px] mt-4 font-black text-white uppercase tracking-widest">Оформление прихода...</div>
+                </div>
+            </div>
+        </div>
+
+        <button id="start-btn" class="w-full bg-blue-600 active:bg-blue-700 py-5 rounded-2xl font-black text-white shadow-lg transition-all active:scale-95 uppercase text-sm tracking-widest touch-manipulation">
+            Запустить сканер
+        </button>
+
+        <div id="results-list" class="space-y-3 pb-24"></div>
+    </div>
+
+    <!-- Звуковой сигнал -->
+    <audio id="beep" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" preload="auto"></audio>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Конфигурация Firebase
+        const firebaseConfig = {
+            apiKey: "", 
+            authDomain: "main-f6446.firebaseapp.com",
+            projectId: "main-f6446",
+            appId: "1:733541253938:web:67d2af040d637199050d2b",
+        };
+
+        const APP_ID = "supplier-tracker-v1";
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        const video = document.getElementById('video');
+        const startBtn = document.getElementById('start-btn');
+        const ocrLoader = document.getElementById('ocr-loader');
+        const resultsList = document.getElementById('results-list');
+        const scanRegion = document.getElementById('scan-region');
+        const liveHint = document.getElementById('live-hint');
+        const beep = document.getElementById('beep');
+
+        // Список поставщиков
+        const SUPPLIERS_LIST = ["АвтоБот", "АвтоНова", "АвтоПалас", "АвтоСпейс", "АвтоТракМоторс", "Автоцентр Север", "АгроФильтр", "Альтра", "Аобел", "Автовар", "АС Север", "Автогаз", "АвтоИдея", "АвтоТраст", "Агромаш", "Аквилон", "АвтоАмазис", "Атлант Премиум", "Боровая", "БЭР-Авто", "БАМС", "Белагро", "БелИнвестЗапчасть", "БелИнвесТорг", "БелМоторДеталь", "БелОил", "БелСтартер", "БелТБ", "Боникс", "ВАЙБЕР", "Визит-Фвто", "Виланд", "ГаммаПлюс", "ГрандОйл", "Диал", "Диас", "Дизель-Кама", "Дюкон", "Дюлвин", "ЕвроЗапчасть", "Запад", "Инструментальный", "ИнтСелПартс", "КарПротект", "КолесоПлюс", "Крипан", "Л-авто", "Лада", "Ленсвязь", "Линник", "Мазикбай", "Мари", "Микро Альянс", "Модников", "Монлибон", "Мотехс", "МоторАвтоГрад", "Немецкая тройка", "НикадагАвто", "ОЕМ", "ЛОйл", "Омега", "ОстХим", "Парад", "ПартсБест", "Почта", "ПС АвтоГруп", "РемАвтоСнаб", "РимБат", "РосАвтоком", "Свиат", "СиванаБел", "Сплат", "ТГ", "ТрансКонсалт", "ТурбоТракс", "Фелокт", "Фильтрация", "Форвард", "Форсаж", "Фострейд", "Францемоторс", "Центр (Восток)", "Шате", "Эквипмент", "ЭкспертОйл", "Энергия"];
+
+        let isProcessing = false;
+        let scanCounter = 0;
+        let currentUser = null;
+
+        const initAuth = async () => {
+            try {
+                await signInAnonymously(auth);
+            } catch (e) { console.error("Auth error", e); }
+        };
+        initAuth();
+
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user;
+        });
+
+        startBtn.addEventListener('click', async () => {
+            beep.play().then(() => beep.pause()).catch(() => {});
+            try {
+                const constraints = { 
+                    video: { 
+                        facingMode: "environment",
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    } 
+                };
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
+                    video.play();
+                    startBtn.style.display = 'none';
+                    scanRegion.style.display = 'block';
+                    runScannerLoop();
+                };
+            } catch (err) {
+                alert("Ошибка доступа к камере.");
+            }
+        });
+
+        async function runScannerLoop() {
+            while (true) {
+                if (!isProcessing && !video.paused) await scan();
+                await new Promise(r => setTimeout(r, 2000)); 
+            }
+        }
+
+        async function scan() {
+            const canvas = document.createElement('canvas');
+            const cw = video.videoWidth;
+            const ch = video.videoHeight;
+            if (!cw || !ch) return;
+
+            canvas.width = 640;
+            canvas.height = 320;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, cw * 0.075, ch * 0.325, cw * 0.85, ch * 0.35, 0, 0, canvas.width, canvas.height);
+
+            try {
+                const result = await Tesseract.recognize(canvas, 'rus');
+                const text = result.data.text.toLowerCase();
+                let match = null;
+                for (let supplier of SUPPLIERS_LIST) {
+                    const sLower = supplier.toLowerCase();
+                    const parts = sLower.split(/\s+/).filter(p => p.length >= 4);
+                    if (text.includes(sLower) || parts.some(p => text.includes(p))) {
+                        match = supplier;
+                        break;
+                    }
+                }
+                if (match) {
+                    isProcessing = true;
+                    ocrLoader.style.display = 'flex';
+                    if (navigator.vibrate) navigator.vibrate(80);
+                    await markAsArrived(match);
+                    isProcessing = false;
+                    ocrLoader.style.display = 'none';
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        async function markAsArrived(name) {
+            if (!currentUser) return;
+            const docId = name.replace(/\s+/g, "_").toLowerCase();
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+            const dateStr = now.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+
+            try {
+                // Путь согласно правилам Firestore
+                const docRef = doc(db, "artifacts", APP_ID, "public", "data", "suppliers", docId);
+                await updateDoc(docRef, { 
+                    status: "arrived", 
+                    arrivalTime: timeStr, 
+                    lastUpdated: serverTimestamp() 
+                });
+
+                if (!document.getElementById(`res-${docId}`)) {
+                    scanCounter++;
+                    beep.play().catch(() => {});
+                    liveHint.innerHTML = `<span class="text-green-500 font-bold">✔ ПРИНЯТО: ${name.toUpperCase()}</span>`;
+                    addHistoryItem(name, dateStr, timeStr, docId, scanCounter);
+                    await new Promise(r => setTimeout(r, 3000));
+                    liveHint.innerHTML = `<span class="work-dot"></span> Наведите на грузоотправителя`;
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        function addHistoryItem(name, date, time, id, index) {
+            const el = document.createElement('div');
+            el.id = `res-${id}`;
+            el.className = "stats-card p-4 rounded-2xl flex justify-between items-center border-l-4 border-blue-500 mb-3";
+            el.innerHTML = `
+                <div class="flex items-center gap-3">
+                    <span class="text-blue-500 font-black text-sm">#${index}</span>
+                    <div class="flex flex-col">
+                        <span class="text-[8px] text-slate-500 font-bold uppercase tracking-widest leading-none">СТАТУС: ПРИБЫЛ</span>
+                        <span class="font-black uppercase text-xs text-white my-0.5">${name}</span>
+                    </div>
+                </div>
+                <div class="text-right">
+                    <div class="text-[9px] text-slate-400 font-bold mb-1">${date}</div>
+                    <div class="text-blue-400 font-mono text-xs font-bold">${time}</div>
+                </div>
+            `;
+            resultsList.prepend(el);
+        }
+    </script>
+</body>
+</html>
