@@ -4,9 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#0f172a">
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>TTN SMART SCANNER v42</title>
+    <title>TTN SMART SCANNER v43</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         :root { --app-blue: #3b82f6; --app-dark: #0f172a; }
@@ -50,8 +48,8 @@
         }
         @keyframes scan-line { 0%, 100% { top: 10%; opacity: 0.2; } 50% { top: 90%; opacity: 0.8; } }
         .stats-card { background: rgba(30, 41, 59, 0.8); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); transition: all 0.3s ease; }
-        .btn-glow { box-shadow: 0 0 20px rgba(59, 130, 246, 0.4); }
         .status-online { color: #10b981; text-shadow: 0 0 8px rgba(16, 185, 129, 0.4); }
+        .btn-glow { box-shadow: 0 0 20px rgba(59, 130, 246, 0.4); }
     </style>
 </head>
 <body class="text-slate-200 p-4 font-sans">
@@ -67,14 +65,14 @@
             <div id="scan-region">
                 <div id="scanner-line"></div>
                 <div class="absolute -bottom-10 left-0 w-full text-center">
-                    <span id="scan-status" class="text-[10px] font-black text-blue-400 uppercase tracking-widest">Поиск поставщика...</span>
+                    <span id="scan-status" class="text-[10px] font-black text-blue-400 uppercase tracking-widest">Поиск накладной...</span>
                 </div>
             </div>
             
             <div id="ocr-loader" class="absolute inset-0 bg-slate-900/60 hidden flex flex-col items-center justify-center z-20 backdrop-blur-sm">
                 <div class="bg-slate-900 p-6 rounded-3xl border-2 border-blue-500/50 shadow-2xl">
                     <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-                    <div class="text-[10px] mt-4 font-black text-white uppercase tracking-widest">Обновление базы...</div>
+                    <div class="text-[10px] mt-4 font-black text-white uppercase tracking-widest">Запись в облако...</div>
                 </div>
             </div>
         </div>
@@ -86,12 +84,12 @@
         </div>
 
         <div class="flex items-center justify-between px-2">
-            <h2 class="text-[10px] font-black uppercase text-slate-500 tracking-widest">Последние прибытия</h2>
-            <div id="db-status" class="text-[9px] font-bold uppercase text-slate-600 tracking-widest">Облако: <span id="cloud-indicator">offline</span></div>
+            <h2 class="text-[10px] font-black uppercase text-slate-500 tracking-widest">История за сегодня</h2>
+            <div id="db-status" class="text-[9px] font-bold uppercase text-slate-600 tracking-widest">Cloud: <span id="cloud-indicator">connecting...</span></div>
         </div>
 
         <div id="results-list" class="space-y-3 pb-24 overflow-y-auto max-h-[35vh]">
-            <!-- Сюда данные придут из Firestore автоматически -->
+            <!-- Синхронизированный список -->
         </div>
     </div>
 
@@ -103,12 +101,12 @@
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, collection, query, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // КОНФИГ (Важно: API Key необходим для работы Auth в Sandbox)
+        // КОНФИГУРАЦИЯ
         const firebaseConfig = {
             apiKey: typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config).apiKey : "",
             authDomain: "main-f6446.firebaseapp.com",
             projectId: "main-f6446",
-            appId: "1:733541253938:web:67d2af040d637199050d2b",
+            appId: "1:733541253938:web:67d2af040d637199050d2b", // Ваш ID
         };
 
         const APP_ID = typeof __app_id !== 'undefined' ? __app_id : "supplier-tracker-v1";
@@ -119,7 +117,6 @@
         const video = document.getElementById('video');
         const startBtn = document.getElementById('start-btn');
         const resultsList = document.getElementById('results-list');
-        const scanStatus = document.getElementById('scan-status');
         const sysMsg = document.getElementById('system-msg');
         const cloudIndicator = document.getElementById('cloud-indicator');
         
@@ -128,83 +125,77 @@
         let worker = null;
         let isOcrReady = false;
         let scanInProgress = false;
-        let currentUser = null;
+        let userAuth = null;
 
-        // ПРАВИЛО 3: Сначала авторизация
-        const initAuth = async () => {
+        // Инициализация авторизации и подписки на данные
+        const initFirebase = async () => {
             try {
                 await signInAnonymously(auth);
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
-                        currentUser = user;
+                        userAuth = user;
                         cloudIndicator.innerText = "connected";
                         cloudIndicator.classList.add("status-online");
-                        setupRealtimeSync(); // Запускаем синхронизацию только после входа
+                        sysMsg.innerText = "Облако активно";
+                        startListening();
                     }
                 });
             } catch (e) {
-                console.error("Auth Error", e);
-                sysMsg.innerText = "Ошибка связи с облаком";
+                cloudIndicator.innerText = "error";
+                sysMsg.innerText = "Ошибка подключения";
             }
         };
 
-        // СИНХРОНИЗАЦИЯ В РЕАЛЬНОМ ВРЕМЕНИ
-        function setupRealtimeSync() {
-            if (!currentUser) return;
-            
-            // ПРАВИЛО 1: Строгий путь
+        // Слушатель изменений (ПРАВИЛО 1 и 2)
+        function startListening() {
             const q = collection(db, 'artifacts', APP_ID, 'public', 'data', 'arrivals');
-            
             onSnapshot(q, (snapshot) => {
-                // Очищаем и перерисовываем список на основе данных из БД
-                resultsList.innerHTML = '';
+                const dataList = [];
+                snapshot.forEach(doc => dataList.push({ id: doc.id, ...doc.data() }));
                 
-                // Сортируем локально по времени (Правило 2: без orderBy в Firebase)
-                const docs = [];
-                snapshot.forEach(doc => docs.push({ id: doc.id, ...doc.data() }));
-                docs.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+                // Сортируем по времени (новое сверху)
+                dataList.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
 
-                docs.forEach(data => {
+                resultsList.innerHTML = '';
+                dataList.forEach(item => {
                     const el = document.createElement('div');
-                    el.id = `item-${data.id}`;
                     el.className = "stats-card p-4 rounded-2xl flex justify-between items-center border-l-4 border-blue-500 mb-2 shadow-lg";
                     el.innerHTML = `
                         <div>
-                            <div class="text-[8px] text-blue-400 font-bold uppercase tracking-widest">Прибыл</div>
-                            <div class="font-black text-white uppercase text-sm">${data.name}</div>
+                            <div class="text-[8px] text-blue-400 font-bold uppercase tracking-widest">Поставщик</div>
+                            <div class="font-black text-white uppercase text-sm">${item.name}</div>
                         </div>
-                        <div class="text-blue-500 font-mono text-xs font-bold bg-blue-500/10 px-2 py-1 rounded-lg">${data.time}</div>
+                        <div class="text-right">
+                            <div class="text-blue-500 font-mono text-xs font-bold bg-blue-500/10 px-2 py-1 rounded-lg">${item.time}</div>
+                            <div class="text-[7px] text-slate-500 mt-1 uppercase font-bold">${item.status || 'Arrived'}</div>
+                        </div>
                     `;
                     resultsList.appendChild(el);
                 });
-            }, (error) => {
-                console.error("Sync Error:", error);
-            });
+            }, (err) => console.error("Snapshot error", err));
         }
 
         async function startApp() {
             startBtn.disabled = true;
-            sysMsg.innerText = "Запуск камеры...";
+            sysMsg.innerText = "Доступ к камере...";
 
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: "environment", width: { ideal: 1280 } },
-                    audio: false
+                    video: { facingMode: "environment", width: { ideal: 1280 } }
                 });
                 video.srcObject = stream;
                 await video.play();
 
                 startBtn.style.display = 'none';
                 document.getElementById('scan-region').style.display = 'block';
+                
                 sysMsg.innerText = "Загрузка AI...";
-
                 await initOCR();
                 sysMsg.innerText = "Сканер готов";
                 loop();
             } catch (err) {
                 startBtn.disabled = false;
                 sysMsg.innerText = "Ошибка камеры";
-                alert("Разрешите доступ к камере.");
             }
         }
 
@@ -213,7 +204,7 @@
             await worker.loadLanguage('rus');
             await worker.initialize('rus');
             await worker.setParameters({
-                tessedit_char_whitelist: 'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя0123456789- ',
+                tessedit_char_whitelist: 'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ0123456789- ',
             });
             isOcrReady = true;
         }
@@ -232,9 +223,7 @@
             const canvas = document.createElement('canvas');
             canvas.width = 640; canvas.height = 320;
             const ctx = canvas.getContext('2d');
-            const vW = video.videoWidth;
-            const vH = video.videoHeight;
-            ctx.drawImage(video, vW * 0.1, vH * 0.35, vW * 0.8, vH * 0.3, 0, 0, 640, 320);
+            ctx.drawImage(video, video.videoWidth * 0.1, video.videoHeight * 0.35, video.videoWidth * 0.8, video.videoHeight * 0.3, 0, 0, 640, 320);
 
             try {
                 const { data: { text } } = await worker.recognize(canvas);
@@ -250,8 +239,8 @@
 
         async function registerSupplier(name) {
             const id = name.replace(/\s+/g, "_").toLowerCase();
-            // Проверяем, есть ли уже такой в DOM (чтобы не спамить)
-            if (document.getElementById(`item-${id}`)) return;
+            // Если уже есть в списке — пропускаем
+            if ([...resultsList.children].some(child => child.innerText.includes(name))) return;
 
             document.getElementById('ocr-loader').classList.remove('hidden');
             if (navigator.vibrate) navigator.vibrate([70, 40]);
@@ -260,24 +249,23 @@
             const time = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
 
             try {
-                if (currentUser) {
+                if (userAuth) {
                     const docRef = doc(db, "artifacts", APP_ID, "public", "data", "arrivals", id);
                     await setDoc(docRef, { 
                         name, 
                         time, 
                         timestamp: serverTimestamp(),
-                        status: "Arrived" 
+                        status: "Ожидает разгрузки" 
                     }, { merge: true });
                 }
             } catch (e) {
-                console.error("Upload fail", e);
+                console.error("Firebase write error", e);
             } finally {
-                setTimeout(() => document.getElementById('ocr-loader').classList.add('hidden'), 800);
+                setTimeout(() => document.getElementById('ocr-loader').classList.add('hidden'), 1000);
             }
         }
 
-        // Запускаем авторизацию сразу при загрузке
-        initAuth();
+        initFirebase();
     </script>
 </body>
 </html>
