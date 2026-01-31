@@ -58,7 +58,7 @@
 
     <header class="text-center mb-6 pt-4">
         <h1 class="text-xl font-black text-white uppercase italic">TTN <span class="text-blue-500">APP</span></h1>
-        <p class="text-[10px] font-bold text-blue-400/60 mt-1 uppercase tracking-widest">Система мгновенного прихода</p>
+        <p class="text-[10px] font-bold text-blue-400/60 mt-1 uppercase tracking-widest text-center w-full">Система мгновенного прихода</p>
     </header>
 
     <div class="max-w-md mx-auto space-y-6">
@@ -73,7 +73,7 @@
             <div id="ocr-loader" class="absolute inset-0 bg-blue-600/20 hidden flex flex-col items-center justify-center z-20 backdrop-blur-sm">
                 <div class="bg-slate-900/90 p-6 rounded-3xl flex flex-col items-center border border-blue-500/50">
                     <div class="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                    <div class="text-[10px] mt-4 font-black text-white uppercase tracking-widest">Анализ текста...</div>
+                    <div class="text-[10px] mt-4 font-black text-white uppercase tracking-widest">Анализ ТТН...</div>
                 </div>
             </div>
         </div>
@@ -92,10 +92,12 @@
         import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // ЗАМЕНИТЕ ЭТУ СТРОКУ НА ВАШ КЛЮЧ ИЗ FIREBASE CONSOLE
-        const MY_REAL_API_KEY = "ВАШ_API_KEY_ЗДЕСЬ"; 
+        // === НАСТРОЙКА API KEY ===
+        // Если вы на GitHub Pages, замените кавычки ниже на ваш ключ (AIzaSy...)
+        const MY_GITHUB_API_KEY = ""; 
         
-        const apiKey = typeof __initial_auth_token !== 'undefined' ? "" : MY_REAL_API_KEY; 
+        // Авто-выбор ключа: системный для чата или ваш для GitHub
+        const apiKey = (typeof __initial_auth_token !== 'undefined') ? "" : MY_GITHUB_API_KEY; 
 
         const firebaseConfig = {
             apiKey: apiKey, 
@@ -127,12 +129,11 @@
                     await signInAnonymously(auth);
                 }
             } catch (err) {
-                console.warn("Auth warning:", err.message);
+                console.warn("Auth initialization skipped or failed. Database might not work until API Key is provided.");
             }
         }
 
         async function startCamera() {
-            // Сначала пробуем максимально простые настройки для задней камеры
             const attempts = [
                 { video: { facingMode: { exact: "environment" } } },
                 { video: { facingMode: "environment" } },
@@ -149,7 +150,7 @@
                     console.warn("Attempt failed:", constraints, e.message);
                 }
             }
-            throw new Error("Не удалось получить доступ ни к одной камере.");
+            throw new Error("Камера не найдена или занята.");
         }
 
         startBtn.addEventListener('click', async () => {
@@ -159,7 +160,7 @@
                 await initAuth();
                 startProcessingLoop();
             } catch (err) {
-                alert("Ошибка: " + err.message + "\nПопробуйте закрыть другие приложения, использующие камеру.");
+                alert("Ошибка доступа к камере. Попробуйте обновить страницу или закрыть другие приложения.");
             }
         });
 
@@ -204,7 +205,7 @@
             const timeStr = new Date().toLocaleTimeString("ru-RU", { hour: '2-digit', minute: '2-digit' });
             
             try {
-                // Если авторизация прошла, сохраняем в БД
+                // Пытаемся сохранить в облако только если мы авторизованы
                 if (auth.currentUser) {
                     const docRef = doc(db, "artifacts", appId, "public", "data", "arrivals", docId);
                     await setDoc(docRef, { 
@@ -215,14 +216,21 @@
                     }, { merge: true });
                 }
 
+                // В любом случае показываем результат на экране
                 beep.play().catch(() => {});
                 const el = document.createElement('div');
                 el.id = `res-${docId}`;
-                el.className = "stats-card p-4 rounded-2xl flex justify-between items-center border-l-4 border-blue-500";
-                el.innerHTML = `<div><div class="text-[8px] text-slate-500 uppercase font-bold">Прибыл</div><div class="font-black text-sm text-white uppercase">${name}</div></div><div class="text-blue-400 font-mono text-xs font-bold">${timeStr}</div>`;
+                el.className = "stats-card p-4 rounded-2xl flex justify-between items-center border-l-4 border-blue-500 mb-2";
+                el.innerHTML = `
+                    <div>
+                        <div class="text-[8px] text-slate-500 uppercase font-bold tracking-widest">Статус: Прибыл</div>
+                        <div class="font-black text-sm text-white uppercase">${name}</div>
+                    </div>
+                    <div class="text-blue-400 font-mono text-xs font-bold">${timeStr}</div>
+                `;
                 resultsList.prepend(el);
             } catch (e) {
-                console.error("Firestore Error:", e);
+                console.error("Database save failed:", e);
             } finally {
                 ocrLoader.style.display = 'none';
             }
