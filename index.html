@@ -10,6 +10,7 @@
     <link rel="manifest" href="manifest.json">
     
     <title>TTN SMART SCANNER</title>
+    <!-- Подключение Tesseract.js для OCR -->
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -17,9 +18,8 @@
         body { 
             background-color: var(--app-dark); 
             -webkit-tap-highlight-color: transparent; 
-            overflow-x: hidden;
+            overflow: hidden;
             overscroll-behavior-y: contain;
-            user-select: none;
         }
         
         #video-container {
@@ -27,26 +27,23 @@
             border-radius: 24px; border: 2px solid rgba(255,255,255,0.1); background: #000;
         }
         
-        video { 
-            width: 100%; height: 100%; object-fit: cover; 
-        }
+        video { width: 100%; height: 100%; object-fit: cover; }
 
         #scan-region {
             position: absolute; top: 50%; left: 50%;
             transform: translate(-50%, -50%);
             width: 85%; height: 35%;
-            border: 2px solid rgba(59, 130, 246, 0.3);
+            border: 2px solid rgba(59, 130, 246, 0.5);
             border-radius: 12px;
             box-shadow: 0 0 0 5000px rgba(15, 23, 42, 0.75);
             z-index: 10;
-            display: none;
         }
 
         .corner { position: absolute; width: 20px; height: 20px; border: 4px solid var(--app-blue); }
-        .tl { top: -2px; left: -2px; border-right: 0; border-bottom: 0; border-radius: 10px 0 0 0; }
-        .tr { top: -2px; right: -2px; border-left: 0; border-bottom: 0; border-radius: 0 10px 0 0; }
-        .bl { bottom: -2px; left: -2px; border-right: 0; border-top: 0; border-radius: 0 0 0 10px; }
-        .br { bottom: -2px; right: -2px; border-left: 0; border-top: 0; border-radius: 0 0 10px 0; }
+        .tl { top: -2px; left: -2px; border-radius: 10px 0 0 0; border-right: 0; border-bottom: 0; }
+        .tr { top: -2px; right: -2px; border-radius: 0 10px 0 0; border-left: 0; border-bottom: 0; }
+        .bl { bottom: -2px; left: -2px; border-radius: 0 0 0 10px; border-right: 0; border-top: 0; }
+        .br { bottom: -2px; right: -2px; border-radius: 0 0 10px 0; border-left: 0; border-top: 0; }
 
         #scanner-line {
             position: absolute; top: 0; left: 0; width: 100%; height: 2px;
@@ -77,25 +74,27 @@
             <div id="ocr-loader" class="absolute inset-0 bg-blue-600/20 hidden flex flex-col items-center justify-center z-20 backdrop-blur-sm">
                 <div class="bg-slate-900/90 p-6 rounded-3xl flex flex-col items-center border border-blue-500/50">
                     <div class="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                    <div class="text-[10px] mt-4 font-black text-white uppercase tracking-widest">Обработка...</div>
+                    <div class="text-[10px] mt-4 font-black text-white uppercase tracking-widest">Анализ текста...</div>
                 </div>
             </div>
         </div>
 
-        <button id="start-btn" class="w-full bg-blue-600 active:bg-blue-700 py-5 rounded-2xl font-black text-white shadow-lg uppercase text-sm tracking-widest">
-            Запустить камеру
+        <button id="start-btn" class="w-full bg-blue-600 active:bg-blue-700 py-5 rounded-2xl font-black text-white shadow-lg uppercase text-sm tracking-widest transition-all">
+            Запустить сканер
         </button>
 
-        <div id="results-list" class="space-y-3 pb-24"></div>
+        <div id="results-list" class="space-y-3 pb-24 overflow-y-auto max-h-[40vh]"></div>
     </div>
 
+    <!-- Звуковое уведомление -->
     <audio id="beep" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" preload="auto"></audio>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
+        // Конфигурация Firebase
         const firebaseConfig = {
             apiKey: "", 
             authDomain: "main-f6446.firebaseapp.com",
@@ -109,79 +108,129 @@
 
         const video = document.getElementById('video');
         const startBtn = document.getElementById('start-btn');
-        const scanRegion = document.getElementById('scan-region');
         const beep = document.getElementById('beep');
         const resultsList = document.getElementById('results-list');
+        const ocrLoader = document.getElementById('ocr-loader');
 
         const SUPPLIERS_LIST = ["АвтоБот", "АвтоНова", "АвтоПалас", "АвтоСпейс", "АвтоТракМоторс", "Автоцентр Север", "АгроФильтр", "Альтра", "Аобел", "Автовар", "АС Север", "Автогаз", "АвтоИдея", "АвтоТраст", "Агромаш", "Аквилон", "АвтоАмазис", "Атлант Премиум", "Боровая", "БЭР-Авто", "БАМС", "Белагро", "БелИнвестЗапчасть", "БелИнвесТорг", "БелМоторДеталь", "БелОил", "БелСтартер", "БелТБ", "Боникс", "ВАЙБЕР", "Визит-Фвто", "Виланд", "ГаммаПлюс", "ГрандОйл", "Диал", "Диас", "Дизель-Кама", "Дюкон", "Дюлвин", "ЕвроЗапчасть", "Запад", "Инструментальный", "ИнтСелПартс", "КарПротект", "КолесоПлюс", "Крипан", "Л-авто", "Лада", "Ленсвязь", "Линник", "Мазикбай", "Мари", "Микро Альянс", "Модников", "Монлибон", "Мотехс", "МоторАвтоГрад", "Немецкая тройка", "НикадагАвто", "ОЕМ", "ЛОйл", "Омега", "ОстХим", "Парад", "ПартсБест", "Почта", "ПС АвтоГруп", "РемАвтоСнаб", "РимБат", "РосАвтоком", "Свиат", "СиванаБел", "Сплат", "ТГ", "ТрансКонсалт", "ТурбоТракс", "Фелокт", "Фильтрация", "Форвард", "Форсаж", "Фострейд", "Францемоторс", "Центр (Восток)", "Шате", "Эквипмент", "ЭкспертОйл", "Энергия"];
 
+        let isScanning = false;
+
         startBtn.addEventListener('click', async () => {
             try {
-                // Пытаемся получить доступ к задней камере
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: { exact: "environment" } } 
-                }).catch(() => {
-                    // Если точное совпадение не сработало (например, на ПК), пробуем обычную камеру
-                    return navigator.mediaDevices.getUserMedia({ video: true });
-                });
-
+                // Запрашиваем камеру с приоритетом задней
+                const constraints = { 
+                    video: { 
+                        facingMode: "environment",
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    } 
+                };
+                
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
                 video.srcObject = stream;
-                video.setAttribute("playsinline", true); 
+                
+                // Важно для iOS Safari
+                video.setAttribute("playsinline", true);
                 video.play();
                 
                 startBtn.style.display = 'none';
-                scanRegion.style.display = 'block';
-                signInAnonymously(auth);
-                startScanning();
+                
+                // Анонимная авторизация перед началом работы с БД
+                await signInAnonymously(auth);
+                
+                startProcessingLoop();
             } catch (err) {
-                console.error(err);
-                alert("Ошибка камеры: " + err.message + "\nУбедитесь, что разрешили доступ к камере в браузере.");
+                console.error("Camera Error:", err);
+                alert("Не удалось запустить камеру. Убедитесь, что сайт открыт через HTTPS и вы дали разрешение.");
             }
         });
 
-        async function startScanning() {
+        async function startProcessingLoop() {
             while (true) {
-                if (!video.paused && video.readyState === 4) {
-                    await performOCR();
+                if (!isScanning && video.readyState === 4) {
+                    await processFrame();
                 }
+                // Пауза между сканированиями для экономии батареи
                 await new Promise(r => setTimeout(r, 2000));
             }
         }
 
-        async function performOCR() {
+        async function processFrame() {
+            isScanning = true;
+            
+            // Создаем временный холст для захвата области сканирования
             const canvas = document.createElement('canvas');
+            const dpr = window.devicePixelRatio || 1;
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
-            canvas.getContext('2d').drawImage(video, 0, 0);
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0);
 
-            const result = await Tesseract.recognize(canvas, 'rus');
-            const text = result.data.text.toLowerCase();
-            
-            for (let supplier of SUPPLIERS_LIST) {
-                if (text.includes(supplier.toLowerCase())) {
-                    await saveArrival(supplier);
-                    break;
+            try {
+                // Распознаем текст (используем русский язык)
+                const { data: { text } } = await Tesseract.recognize(canvas, 'rus');
+                const lowerText = text.toLowerCase();
+                
+                for (let supplier of SUPPLIERS_LIST) {
+                    if (lowerText.includes(supplier.toLowerCase())) {
+                        await registerArrival(supplier);
+                        break; 
+                    }
                 }
+            } catch (e) {
+                console.error("OCR Error:", e);
+            } finally {
+                isScanning = false;
             }
         }
 
-        async function saveArrival(name) {
+        async function registerArrival(name) {
             const docId = name.replace(/\s+/g, "_").toLowerCase();
+            
+            // Если уже сканировали в этой сессии, пропускаем
             if (document.getElementById(`res-${docId}`)) return;
 
-            beep.play();
-            const time = new Date().toLocaleTimeString();
+            ocrLoader.style.display = 'flex';
+            
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString("ru-RU", { hour: '2-digit', minute: '2-digit' });
             
             try {
-                const docRef = doc(db, "artifacts", "supplier-tracker-v1", "public", "data", "suppliers", docId);
-                await updateDoc(docRef, { status: "arrived", arrivalTime: time, lastUpdated: serverTimestamp() });
-                
+                // Сохранение в Firestore (Публичная коллекция согласно правилам)
+                const docRef = doc(db, "artifacts", "supplier-tracker-v1", "public", "data", "arrivals", docId);
+                await setDoc(docRef, { 
+                    name: name,
+                    status: "arrived", 
+                    time: timeStr, 
+                    timestamp: serverTimestamp() 
+                }, { merge: true });
+
+                // Звуковой сигнал и вибрация
+                beep.play().catch(() => {});
+                if (navigator.vibrate) navigator.vibrate(100);
+
+                // Добавление в список на экране
                 const el = document.createElement('div');
                 el.id = `res-${docId}`;
-                el.className = "stats-card p-4 rounded-2xl flex justify-between items-center border-l-4 border-blue-500";
-                el.innerHTML = `<div><div class="text-[8px] text-slate-500 uppercase font-bold">Прибыл</div><div class="font-black text-xs text-white uppercase">${name}</div></div><div class="text-blue-400 font-mono text-xs">${time}</div>`;
+                el.className = "stats-card p-4 rounded-2xl flex justify-between items-center border-l-4 border-blue-500 animate-pulse";
+                el.innerHTML = `
+                    <div>
+                        <div class="text-[8px] text-slate-500 uppercase font-bold tracking-widest">Статус: Прибыл</div>
+                        <div class="font-black text-sm text-white uppercase">${name}</div>
+                    </div>
+                    <div class="text-blue-400 font-mono text-xs font-bold">${timeStr}</div>
+                `;
                 resultsList.prepend(el);
-            } catch (e) { console.error(e); }
+                
+                // Убираем анимацию через пару секунд
+                setTimeout(() => el.classList.remove('animate-pulse'), 2000);
+
+            } catch (e) {
+                console.error("Firestore Error:", e);
+            } finally {
+                ocrLoader.style.display = 'none';
+            }
         }
     </script>
 </body>
