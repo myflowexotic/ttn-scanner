@@ -10,7 +10,6 @@
     <link rel="manifest" href="manifest.json">
     
     <title>TTN SMART SCANNER</title>
-    <!-- Подключение Tesseract.js для OCR -->
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -86,17 +85,18 @@
         <div id="results-list" class="space-y-3 pb-24 overflow-y-auto max-h-[40vh]"></div>
     </div>
 
-    <!-- Звуковое уведомление -->
     <audio id="beep" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" preload="auto"></audio>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Конфигурация Firebase
+        // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Автоматический выбор ключа
+        const apiKey = typeof __initial_auth_token !== 'undefined' ? "" : "ВАШ_API_KEY_ИЗ_FIREBASE_CONSOLE"; 
+
         const firebaseConfig = {
-            apiKey: "", 
+            apiKey: apiKey, 
             authDomain: "main-f6446.firebaseapp.com",
             projectId: "main-f6446",
             appId: "1:733541253938:web:67d2af040d637199050d2b",
@@ -105,6 +105,7 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'supplier-tracker-v1';
 
         const video = document.getElementById('video');
         const startBtn = document.getElementById('start-btn');
@@ -116,33 +117,36 @@
 
         let isScanning = false;
 
+        async function initAuth() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (err) {
+                console.error("Auth Error:", err);
+                // Если это ваш личный проект, убедитесь что в Firebase включен метод "Anonymous"
+            }
+        }
+
         startBtn.addEventListener('click', async () => {
             try {
-                // Запрашиваем камеру с приоритетом задней
                 const constraints = { 
-                    video: { 
-                        facingMode: "environment",
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
-                    } 
+                    video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } 
                 };
                 
                 const stream = await navigator.mediaDevices.getUserMedia(constraints);
                 video.srcObject = stream;
-                
-                // Важно для iOS Safari
                 video.setAttribute("playsinline", true);
                 video.play();
                 
                 startBtn.style.display = 'none';
                 
-                // Анонимная авторизация перед началом работы с БД
-                await signInAnonymously(auth);
-                
+                await initAuth();
                 startProcessingLoop();
             } catch (err) {
-                console.error("Camera Error:", err);
-                alert("Не удалось запустить камеру. Убедитесь, что сайт открыт через HTTPS и вы дали разрешение.");
+                alert("Ошибка: " + err.message);
             }
         });
 
@@ -151,24 +155,18 @@
                 if (!isScanning && video.readyState === 4) {
                     await processFrame();
                 }
-                // Пауза между сканированиями для экономии батареи
                 await new Promise(r => setTimeout(r, 2000));
             }
         }
 
         async function processFrame() {
             isScanning = true;
-            
-            // Создаем временный холст для захвата области сканирования
             const canvas = document.createElement('canvas');
-            const dpr = window.devicePixelRatio || 1;
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0);
+            canvas.getContext('2d').drawImage(video, 0, 0);
 
             try {
-                // Распознаем текст (используем русский язык)
                 const { data: { text } } = await Tesseract.recognize(canvas, 'rus');
                 const lowerText = text.toLowerCase();
                 
@@ -186,19 +184,15 @@
         }
 
         async function registerArrival(name) {
+            if (!auth.currentUser) return;
             const docId = name.replace(/\s+/g, "_").toLowerCase();
-            
-            // Если уже сканировали в этой сессии, пропускаем
             if (document.getElementById(`res-${docId}`)) return;
 
             ocrLoader.style.display = 'flex';
-            
-            const now = new Date();
-            const timeStr = now.toLocaleTimeString("ru-RU", { hour: '2-digit', minute: '2-digit' });
+            const timeStr = new Date().toLocaleTimeString("ru-RU", { hour: '2-digit', minute: '2-digit' });
             
             try {
-                // Сохранение в Firestore (Публичная коллекция согласно правилам)
-                const docRef = doc(db, "artifacts", "supplier-tracker-v1", "public", "data", "arrivals", docId);
+                const docRef = doc(db, "artifacts", appId, "public", "data", "arrivals", docId);
                 await setDoc(docRef, { 
                     name: name,
                     status: "arrived", 
@@ -206,26 +200,12 @@
                     timestamp: serverTimestamp() 
                 }, { merge: true });
 
-                // Звуковой сигнал и вибрация
                 beep.play().catch(() => {});
-                if (navigator.vibrate) navigator.vibrate(100);
-
-                // Добавление в список на экране
                 const el = document.createElement('div');
                 el.id = `res-${docId}`;
-                el.className = "stats-card p-4 rounded-2xl flex justify-between items-center border-l-4 border-blue-500 animate-pulse";
-                el.innerHTML = `
-                    <div>
-                        <div class="text-[8px] text-slate-500 uppercase font-bold tracking-widest">Статус: Прибыл</div>
-                        <div class="font-black text-sm text-white uppercase">${name}</div>
-                    </div>
-                    <div class="text-blue-400 font-mono text-xs font-bold">${timeStr}</div>
-                `;
+                el.className = "stats-card p-4 rounded-2xl flex justify-between items-center border-l-4 border-blue-500";
+                el.innerHTML = `<div><div class="text-[8px] text-slate-500 uppercase font-bold">Прибыл</div><div class="font-black text-sm text-white uppercase">${name}</div></div><div class="text-blue-400 font-mono text-xs font-bold">${timeStr}</div>`;
                 resultsList.prepend(el);
-                
-                // Убираем анимацию через пару секунд
-                setTimeout(() => el.classList.remove('animate-pulse'), 2000);
-
             } catch (e) {
                 console.error("Firestore Error:", e);
             } finally {
